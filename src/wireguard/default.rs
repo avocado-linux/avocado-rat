@@ -3,8 +3,9 @@ use super::quick_config::QuickConfig;
 use super::types::{Interface, PacketStats, Peer};
 use anyhow::{Context, Result, bail};
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tracing::{debug, warn};
 
 /// WireGuard implementation using system commands (wg-quick, wg) and sysfs.
@@ -116,5 +117,52 @@ impl WireGuard for DefaultWireGuard {
         }
 
         Ok(0)
+    }
+
+    fn generate_key_pair(&self) -> Result<(String, String)> {
+        let genkey = Command::new("wg")
+            .arg("genkey")
+            .output()
+            .context("Failed to execute wg genkey")?;
+
+        if !genkey.status.success() {
+            let stderr = String::from_utf8_lossy(&genkey.stderr);
+            bail!("wg genkey failed: {stderr}");
+        }
+
+        let private_key = String::from_utf8(genkey.stdout)
+            .context("wg genkey output is not valid UTF-8")?
+            .trim()
+            .to_string();
+
+        let mut pubkey_proc = Command::new("wg")
+            .arg("pubkey")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .context("Failed to spawn wg pubkey")?;
+
+        pubkey_proc
+            .stdin
+            .take()
+            .context("Failed to open stdin for wg pubkey")?
+            .write_all(private_key.as_bytes())
+            .context("Failed to write private key to wg pubkey")?;
+
+        let pubkey_out = pubkey_proc
+            .wait_with_output()
+            .context("Failed to wait for wg pubkey")?;
+
+        if !pubkey_out.status.success() {
+            let stderr = String::from_utf8_lossy(&pubkey_out.stderr);
+            bail!("wg pubkey failed: {stderr}");
+        }
+
+        let public_key = String::from_utf8(pubkey_out.stdout)
+            .context("wg pubkey output is not valid UTF-8")?
+            .trim()
+            .to_string();
+
+        Ok((private_key, public_key))
     }
 }

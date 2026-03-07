@@ -29,4 +29,9 @@ pub trait WireGuard: Send + Sync {
     /// Read the latest handshake timestamp for a peer on an interface.
     /// Returns seconds since epoch, or 0 if no handshake.
     fn latest_handshake(&self, iface_name: &str) -> Result<u64>;
+
+    /// Generate a WireGuard key pair using `wg genkey` / `wg pubkey`.
+    /// Returns (private_key, public_key) as base64 strings.
+    #[allow(dead_code)]
+    fn generate_key_pair(&self) -> Result<(String, String)>;
 }
